@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "QueryAnyRest",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "QueryAnyRest/QueryAnyRest.csproj", "--launch-profile", "QueryAnyRest"],
+      "port": 5290
+    }
+  ]
+}
