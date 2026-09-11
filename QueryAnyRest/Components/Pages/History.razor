@@ -1,0 +1,113 @@
+@page "/history"
+@inject RunHistory Runs
+@implements IDisposable
+
+<PageTitle>Run history — Query Any REST</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Run history</h1>
+        <p>The last runs, scheduled and manual, with the file each one produced.</p>
+    </div>
+    <div class="actions">
+        <button @onclick="RefreshAsync">Refresh</button>
+        @if (_confirmClear)
+        {
+            <button class="danger" @onclick="ClearAsync">Clear the list</button>
+            <button @onclick="() => _confirmClear = false">Keep it</button>
+        }
+        else
+        {
+            <button class="danger" @onclick="() => _confirmClear = true">Clear</button>
+        }
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-body flush">
+        @if (_records is null)
+        {
+            <div class="empty"><p>Loading…</p></div>
+        }
+        else if (_records.Count == 0)
+        {
+            <div class="empty"><p>No runs recorded yet.</p></div>
+        }
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>Started</th>
+                        <th>Configuration</th>
+                        <th>Trigger</th>
+                        <th>Result</th>
+                        <th>File</th>
+                        <th class="shrink">Took</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var record in _records)
+                {
+                    <tr>
+                        <td class="mono shrink">@record.StartedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@record.ConfigurationName</td>
+                        <td class="subtle">@record.Trigger</td>
+                        <td>
+                            <div class="stack">
+                                <span class="tag @(record.Success ? "ok" : "fail")">
+                                    @record.StatusText@(record.StatusCode is null ? "" : $" · {record.StatusCode}")
+                                </span>
+                                @if (record.Error is not null)
+                                {
+                                    <span class="subtle">@record.Error</span>
+                                }
+                            </div>
+                        </td>
+                        <td class="mono">
+                            @if (record.FilePath is null)
+                            {
+                                <span class="subtle">—</span>
+                            }
+                            else
+                            {
+                                @record.FilePath
+                                <span class="subtle"> (@record.BytesWritten B)</span>
+                            }
+                        </td>
+                        <td class="mono shrink">@record.DurationMs ms</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private List<RunRecord>? _records;
+    private bool _confirmClear;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Runs.Changed += OnChanged;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync() => _records = (await Runs.GetAsync()).ToList();
+
+    private async Task ClearAsync()
+    {
+        await Runs.ClearAsync();
+        _confirmClear = false;
+        await RefreshAsync();
+    }
+
+    private void OnChanged() => InvokeAsync(async () =>
+    {
+        await RefreshAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Runs.Changed -= OnChanged;
+}

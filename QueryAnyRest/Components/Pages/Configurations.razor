@@ -1,0 +1,215 @@
+@page "/configurations"
+@inject ConfigurationStore Store
+@inject JobStateStore JobStates
+@inject NavigationManager Nav
+
+<PageTitle>Configurations — Query Any REST</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Configurations</h1>
+        <p>Every saved endpoint, with its authentication, transform and schedule. They live in
+           <span class="mono">configurations.json</span> next to the service.</p>
+    </div>
+    <div class="actions">
+        <button class="primary" @onclick="CreateNew">New configuration</button>
+    </div>
+</div>
+
+@if (_message is not null)
+{
+    <div class="notice @(_messageIsError ? "fail" : "ok")">@_message</div>
+}
+
+<div class="panel">
+    <div class="panel-body flush">
+        @if (_configurations is null)
+        {
+            <div class="empty"><p>Loading…</p></div>
+        }
+        else if (_configurations.Count == 0)
+        {
+            <div class="empty">
+                <p>Nothing saved yet. Create a configuration, or paste a settings block below.</p>
+                <button class="primary" @onclick="CreateNew">New configuration</button>
+            </div>
+        }
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Endpoint</th>
+                        <th>Authentication</th>
+                        <th>Schedule</th>
+                        <th>Last run</th>
+                        <th class="shrink"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var configuration in _configurations)
+                {
+                    var state = StateFor(configuration.Id);
+                    <tr>
+                        <td>
+                            <div class="stack">
+                                <a href="@($"configurations/{configuration.Id}")">@configuration.Name</a>
+                                @if (!string.IsNullOrWhiteSpace(configuration.Description))
+                                {
+                                    <span class="subtle">@configuration.Description</span>
+                                }
+                            </div>
+                        </td>
+                        <td class="mono">@configuration.Request.Method @configuration.Request.BuildUrl()</td>
+                        <td>@DescribeAuth(configuration.Auth.Mode)</td>
+                        <td>
+                            @if (configuration.Schedule.Enabled && configuration.Schedule.Mode != ScheduleMode.Manual)
+                            {
+                                <div class="stack">
+                                    <span class="tag armed">@configuration.Schedule.Describe()</span>
+                                    <span class="subtle">Next @Local(state?.NextDueUtc)</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="tag idle">Manual</span>
+                            }
+                        </td>
+                        <td>
+                            @if (state?.LastRunUtc is null)
+                            {
+                                <span class="subtle">Never</span>
+                            }
+                            else
+                            {
+                                <div class="stack">
+                                    <span class="tag @(state.LastError is null ? "ok" : "fail")">
+                                        @(state.LastError is null ? "OK" : "Failed")
+                                    </span>
+                                    <span class="subtle">@Local(state.LastRunUtc)</span>
+                                </div>
+                            }
+                        </td>
+                        <td class="shrink">
+                            <div class="actions">
+                                <a class="button" href="@($"/?configuration={configuration.Id}")">Open on bench</a>
+                                <button @onclick="() => DuplicateAsync(configuration.Id)">Duplicate</button>
+                                @if (_confirmDeleteId == configuration.Id)
+                                {
+                                    <button class="danger" @onclick="() => DeleteAsync(configuration.Id)">Delete for good</button>
+                                    <button @onclick="() => _confirmDeleteId = null">Keep</button>
+                                }
+                                else
+                                {
+                                    <button class="danger" @onclick="() => _confirmDeleteId = configuration.Id">Delete</button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-head">
+        <div>
+            <h2>Paste a settings block</h2>
+            <p>Reads the appsettings shape these APIs usually ship with. One block or several at once.</p>
+        </div>
+    </div>
+    <div class="panel-body">
+        <div class="field wide">
+            <label for="snippet">Settings JSON</label>
+            <textarea id="snippet" class="mono" rows="10" @bind="_snippet" placeholder="@SnippetPlaceholder"></textarea>
+            <span class="hint">AuthUrl turns on the OAuth 2.0 password grant. ApiUrl becomes the endpoint. Everything else can be adjusted afterwards.</span>
+        </div>
+        <div class="actions" style="margin-top:12px">
+            <button class="primary" @onclick="ImportAsync" disabled="@string.IsNullOrWhiteSpace(_snippet)">Add endpoints</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<ApiConfiguration>? _configurations;
+    private List<JobState> _states = new();
+    private string? _confirmDeleteId;
+    private string _snippet = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
+
+    // The Razor parser does not understand raw string literals, so this stays verbatim.
+    private const string SnippetPlaceholder = @"""OneView"": {
+  ""AuthUrl"": ""http://10.64.2.142/oneview4/auth"",
+  ""ApiUrl"": ""http://10.64.2.142/oneview4/api/nbi"",
+  ""Username"": ""Remote"",
+  ""Password"": ""Remote"",
+  ""ClientId"": ""oneview.public"",
+  ""ClientSecret"": ""..."",
+  ""Scope"": ""public.webapi offline_access""
+}";
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _configurations = (await Store.GetAllAsync()).ToList();
+        _states = (await JobStates.GetAllAsync()).ToList();
+    }
+
+    private JobState? StateFor(string id) => _states.FirstOrDefault(s => s.ConfigurationId == id);
+
+    private void CreateNew() => Nav.NavigateTo("configurations/new");
+
+    private async Task DuplicateAsync(string id)
+    {
+        var copy = await Store.DuplicateAsync(id);
+        Nav.NavigateTo($"configurations/{copy.Id}");
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        var name = _configurations?.FirstOrDefault(c => c.Id == id)?.Name ?? "Configuration";
+        await Store.DeleteAsync(id);
+        _confirmDeleteId = null;
+        Show($"Deleted {name}.", isError: false);
+        await ReloadAsync();
+    }
+
+    private async Task ImportAsync()
+    {
+        try
+        {
+            var imported = SnippetImporter.Parse(_snippet);
+            foreach (var configuration in imported)
+                await Store.SaveAsync(configuration);
+
+            _snippet = string.Empty;
+            Show($"Added {imported.Count} endpoint{(imported.Count == 1 ? "" : "s")}. Open one to set its path and transform.", isError: false);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Show(ex.Message, isError: true);
+        }
+    }
+
+    private void Show(string message, bool isError)
+    {
+        _message = message;
+        _messageIsError = isError;
+    }
+
+    private static string DescribeAuth(AuthMode mode) => mode switch
+    {
+        AuthMode.OAuth2Password => "OAuth 2.0 password grant",
+        AuthMode.StaticBearer => "Bearer token",
+        _ => "None"
+    };
+
+    private static string Local(DateTimeOffset? moment) =>
+        moment is null ? "—" : moment.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+}

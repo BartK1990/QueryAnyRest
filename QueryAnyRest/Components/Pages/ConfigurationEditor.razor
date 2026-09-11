@@ -1,0 +1,627 @@
+@page "/configurations/new"
+@page "/configurations/{Id}"
+@inject ConfigurationStore Store
+@inject OAuthTokenService Tokens
+@inject TokenStore TokenStates
+@inject NavigationManager Nav
+
+<PageTitle>@(_configuration?.Name ?? "Configuration") — Query Any REST</PageTitle>
+
+@if (_configuration is null)
+{
+    <h1>Configuration</h1>
+    <p class="subtle">@(_loadError ?? "Loading…")</p>
+}
+else
+{
+    <div class="page-head">
+        <div>
+            <h1>@(_isNew ? "New configuration" : _configuration.Name)</h1>
+            <p>Set how the call is authenticated, what it asks for, how the answer is reshaped and when it repeats.</p>
+        </div>
+        <div class="actions">
+            <a class="button" href="configurations">Back to list</a>
+        </div>
+    </div>
+
+    @if (_problems.Count > 0)
+    {
+        <div class="notice fail">
+            <strong>Fix these before saving</strong>
+            <ul>
+                @foreach (var problem in _problems)
+                {
+                    <li>@problem</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @if (_message is not null)
+    {
+        <div class="notice @(_messageIsError ? "fail" : "ok")">@_message</div>
+    }
+
+    <div class="panel">
+        <div class="panel-head"><h2>Identity</h2></div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field">
+                    <label for="name">Name</label>
+                    <input id="name" type="text" @bind="_configuration.Name" />
+                </div>
+                <div class="field">
+                    <label for="description">Description</label>
+                    <input id="description" type="text" @bind="_configuration.Description"
+                           placeholder="What this export is for" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-head">
+            <div>
+                <h2>Authentication</h2>
+                <p>Open APIs need nothing here. The password grant caches its token and rotates the refresh token.</p>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field">
+                    <label for="authmode">Mode</label>
+                    <select id="authmode" @bind="_configuration.Auth.Mode">
+                        <option value="@AuthMode.None">No authentication</option>
+                        <option value="@AuthMode.OAuth2Password">OAuth 2.0 password grant</option>
+                        <option value="@AuthMode.StaticBearer">Bearer token I already have</option>
+                    </select>
+                </div>
+            </div>
+
+            @if (_configuration.Auth.Mode == AuthMode.StaticBearer)
+            {
+                <div class="grid" style="margin-top:14px">
+                    <div class="field wide">
+                        <label for="statictoken">Token</label>
+                        <input id="statictoken" type="password" class="mono" autocomplete="new-password"
+                               @bind="_newStaticToken" placeholder="@SecretPlaceholder(_configuration.Auth.StaticToken)" />
+                        <span class="hint">Sent as <span class="mono">@_configuration.Auth.HeaderName: @_configuration.Auth.TokenPrefix &lt;token&gt;</span></span>
+                    </div>
+                </div>
+            }
+
+            @if (_configuration.Auth.Mode == AuthMode.OAuth2Password)
+            {
+                <div class="grid" style="margin-top:14px">
+                    <div class="field wide">
+                        <label for="authurl">Token URL</label>
+                        <input id="authurl" type="text" class="mono" @bind="_configuration.Auth.AuthUrl"
+                               placeholder="http://10.64.2.142/oneview4/auth" />
+                    </div>
+                    <div class="field">
+                        <label for="username">User name</label>
+                        <input id="username" type="text" @bind="_configuration.Auth.Username" />
+                    </div>
+                    <div class="field">
+                        <label for="password">Password</label>
+                        <input id="password" type="password" autocomplete="new-password"
+                               @bind="_newPassword" placeholder="@SecretPlaceholder(_configuration.Auth.Password)" />
+                        <span class="hint">@SecretHint(_configuration.Auth.Password)</span>
+                    </div>
+                    <div class="field">
+                        <label for="clientid">Client id</label>
+                        <input id="clientid" type="text" class="mono" @bind="_configuration.Auth.ClientId" />
+                    </div>
+                    <div class="field">
+                        <label for="clientsecret">Client secret</label>
+                        <input id="clientsecret" type="password" class="mono" autocomplete="new-password"
+                               @bind="_newClientSecret" placeholder="@SecretPlaceholder(_configuration.Auth.ClientSecret)" />
+                        <span class="hint">@SecretHint(_configuration.Auth.ClientSecret)</span>
+                    </div>
+                    <div class="field wide">
+                        <label for="scope">Scope</label>
+                        <input id="scope" type="text" class="mono" @bind="_configuration.Auth.Scope"
+                               placeholder="public.webapi offline_access" />
+                        <span class="hint">Most servers only issue a refresh token when <span class="mono">offline_access</span> is in the scope.</span>
+                    </div>
+                    <div class="field">
+                        <label for="placement">Client credentials go in</label>
+                        <select id="placement" @bind="_configuration.Auth.CredentialPlacement">
+                            <option value="@ClientCredentialPlacement.RequestBody">The form body</option>
+                            <option value="@ClientCredentialPlacement.BasicHeader">A Basic authorization header</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="skew">Refresh this many seconds early</label>
+                        <input id="skew" type="number" min="0" max="3600" @bind="_configuration.Auth.RefreshSkewSeconds" />
+                    </div>
+                    <div class="field wide">
+                        <label class="check">
+                            <input type="checkbox" @bind="_configuration.Auth.UseRefreshToken" />
+                            <span>
+                                Refresh with the refresh token
+                                <span class="hint">When off, every expiry sends the password again. When on, a rejected refresh still falls back to the password once.</span>
+                            </span>
+                        </label>
+                    </div>
+                    <div class="field wide">
+                        <label>Extra token request fields</label>
+                        <KeyValueEditor Items="_configuration.Auth.ExtraTokenParameters"
+                                        KeyPlaceholder="acr_values" ValuePlaceholder="value"
+                                        AddLabel="Add token field" />
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top:16px">
+                    <div class="panel-head">
+                        <div>
+                            <h2>Current token</h2>
+                            <p>Held in <span class="mono">tokens.json</span> so a restart does not lose the rotation.</p>
+                        </div>
+                        <div class="actions">
+                            <button @onclick="TestTokenAsync" disabled="@_busy">Get a token now</button>
+                            <button @onclick="ForgetTokenAsync" disabled="@_busy">Forget token</button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        @if (_tokenState is null)
+                        {
+                            <p class="subtle">No token held. Save the configuration, then fetch one to check the credentials.</p>
+                        }
+                        else
+                        {
+                            <div class="grid thirds">
+                                <div class="stack">
+                                    <span class="subtle">Obtained by</span>
+                                    <strong class="mono">@_tokenState.LastGrantUsed</strong>
+                                </div>
+                                <div class="stack">
+                                    <span class="subtle">Expires</span>
+                                    <strong class="mono">@_tokenState.ExpiresAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</strong>
+                                </div>
+                                <div class="stack">
+                                    <span class="subtle">Refresh token</span>
+                                    <strong class="mono">@(string.IsNullOrEmpty(_tokenState.RefreshToken) ? "none" : $"held, rotated {_tokenState.RefreshCount}×")</strong>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-head"><h2>Request</h2></div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field">
+                    <label for="method">Method</label>
+                    <select id="method" @bind="_configuration.Request.Method">
+                        @foreach (var method in Methods)
+                        {
+                            <option value="@method">@method</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="timeout">Timeout in seconds</label>
+                    <input id="timeout" type="number" min="1" max="3600" @bind="_configuration.Request.TimeoutSeconds" />
+                </div>
+                <div class="field wide">
+                    <label for="baseurl">API URL</label>
+                    <input id="baseurl" type="text" class="mono" @bind="_configuration.Request.BaseUrl"
+                           placeholder="http://10.64.2.142/oneview4/api/nbi" />
+                </div>
+                <div class="field wide">
+                    <label for="path">Path</label>
+                    <input id="path" type="text" class="mono" @bind="_configuration.Request.Path"
+                           placeholder="/alarms/active" />
+                    <span class="hint">Resolves to <span class="mono">@_configuration.Request.BuildUrl()</span></span>
+                </div>
+                <div class="field wide">
+                    <label>Query parameters</label>
+                    <KeyValueEditor Items="_configuration.Request.QueryParameters"
+                                    KeyPlaceholder="from" ValuePlaceholder="2026-01-01T00:00:00Z"
+                                    AddLabel="Add parameter" />
+                </div>
+                <div class="field wide">
+                    <label>Headers</label>
+                    <KeyValueEditor Items="_configuration.Request.Headers"
+                                    KeyPlaceholder="Accept" ValuePlaceholder="application/json"
+                                    AddLabel="Add header" />
+                </div>
+
+                @if (!string.Equals(_configuration.Request.Method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    <div class="field">
+                        <label for="contenttype">Body content type</label>
+                        <input id="contenttype" type="text" class="mono" @bind="_configuration.Request.ContentType" />
+                    </div>
+                    <div class="field wide">
+                        <label for="body">Body</label>
+                        <textarea id="body" class="mono" rows="8" @bind="_configuration.Request.Body"></textarea>
+                    </div>
+                }
+
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Request.AllowInvalidCertificates" />
+                        <span>
+                            Accept any TLS certificate from this host
+                            <span class="hint">For appliances with a self-signed certificate. It disables certificate checks for this configuration only.</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-head">
+            <div>
+                <h2>Transform</h2>
+                <p>Decides what lands in the file. Without a script, JSON is re-indented and CSV is flattened from the first array in the payload.</p>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field">
+                    <label for="format">Output format</label>
+                    <select id="format" @bind="_configuration.Transform.Format">
+                        <option value="@OutputFormat.Json">JSON</option>
+                        <option value="@OutputFormat.Csv">CSV</option>
+                        <option value="@OutputFormat.Raw">Raw response</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="scripttimeout">Script timeout in seconds</label>
+                    <input id="scripttimeout" type="number" min="1" max="300" @bind="_configuration.Transform.ScriptTimeoutSeconds" />
+                </div>
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Transform.UseScript" />
+                        <span>
+                            Shape the response with JavaScript
+                            <span class="hint">Runs in a sandbox with a time and memory limit. It has no file, network or host access.</span>
+                        </span>
+                    </label>
+                </div>
+
+                @if (_configuration.Transform.UseScript)
+                {
+                    <div class="field wide">
+                        <label for="script">Script</label>
+                        <textarea id="script" class="mono" rows="18" @bind="_configuration.Transform.Script"></textarea>
+                        <span class="hint">
+                            Available: <span class="mono">response</span> (raw text),
+                            <span class="mono">json</span> (parsed body or null),
+                            <span class="mono">log(x)</span> (writes to the run log).
+                            Return a string, or an object that gets stringified.
+                        </span>
+                    </div>
+                    <div class="field wide">
+                        <div class="actions">
+                            <button @onclick="() => _configuration.Transform.Script = TransformSettings.DefaultCsvScript">Load the CSV example</button>
+                            <button @onclick="() => _configuration.Transform.Script = TransformSettings.DefaultJsonScript">Load the JSON example</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-head">
+            <div>
+                <h2>Output file</h2>
+                <p>Where scheduled runs write. The service account needs write access to this folder.</p>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field wide">
+                    <label for="directory">Folder</label>
+                    <input id="directory" type="text" class="mono" @bind="_configuration.Output.Directory"
+                           placeholder="C:\ProgramData\QueryAnyRest\exports" />
+                </div>
+                <div class="field">
+                    <label for="filename">File name</label>
+                    <input id="filename" type="text" class="mono" @bind="_configuration.Output.FileNameBase" />
+                </div>
+                <div class="field">
+                    <label for="stampformat">Timestamp format</label>
+                    <input id="stampformat" type="text" class="mono" @bind="_configuration.Output.TimestampFormat" />
+                </div>
+                <div class="field">
+                    <label for="extension">Extension override</label>
+                    <input id="extension" type="text" class="mono" @bind="_configuration.Output.ExtensionOverride"
+                           placeholder="from the format" />
+                </div>
+                <div class="field">
+                    <label>Preview</label>
+                    <input type="text" class="mono" readonly
+                           value="@_configuration.Output.BuildFileName(_configuration.Transform.Format, DateTimeOffset.Now)" />
+                </div>
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Output.AppendTimestamp" />
+                        <span>Append the timestamp to the file name</span>
+                    </label>
+                </div>
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Output.UseLocalTimeInName" />
+                        <span>
+                            Use machine local time in the name
+                            <span class="hint">Turn off to stamp in UTC, which avoids duplicate names at the autumn clock change.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Output.SkipEmptyResults" />
+                        <span>Skip the file when the transform produced nothing</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-head">
+            <div>
+                <h2>Schedule</h2>
+                <p>@(_configuration.Schedule.Enabled ? _configuration.Schedule.Describe() : "Runs only when you press Run.")</p>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field wide">
+                    <label class="check">
+                        <input type="checkbox" @bind="_configuration.Schedule.Enabled" />
+                        <span>Run this query on a schedule and write a file each time</span>
+                    </label>
+                </div>
+
+                @if (_configuration.Schedule.Enabled)
+                {
+                    <div class="field">
+                        <label for="mode">How often</label>
+                        <select id="mode" @bind="_configuration.Schedule.Mode">
+                            @* Without this the browser shows the first option while the model still says Manual. *@
+                            <option value="@ScheduleMode.Manual" disabled>Pick how often…</option>
+                            <option value="@ScheduleMode.EveryNMinutes">Every N minutes</option>
+                            <option value="@ScheduleMode.Hourly">Every hour</option>
+                            <option value="@ScheduleMode.Daily">Every day</option>
+                            <option value="@ScheduleMode.Weekly">Every week</option>
+                            <option value="@ScheduleMode.Monthly">Every month</option>
+                        </select>
+                    </div>
+
+                    @switch (_configuration.Schedule.Mode)
+                    {
+                        case ScheduleMode.EveryNMinutes:
+                            <div class="field">
+                                <label for="interval">Minutes between runs</label>
+                                <input id="interval" type="number" min="1" max="40320" @bind="_configuration.Schedule.IntervalMinutes" />
+                            </div>
+                            break;
+
+                        case ScheduleMode.Hourly:
+                            <div class="field">
+                                <label for="minute">At minute</label>
+                                <input id="minute" type="number" min="0" max="59" @bind="_configuration.Schedule.MinuteOfHour" />
+                            </div>
+                            break;
+
+                        case ScheduleMode.Daily:
+                            <div class="field">
+                                <label for="dailytime">At</label>
+                                <input id="dailytime" type="time" value="@_configuration.Schedule.TimeOfDay" @onchange="SetTimeOfDay" />
+                            </div>
+                            break;
+
+                        case ScheduleMode.Weekly:
+                            <div class="field">
+                                <label for="weekday">On</label>
+                                <select id="weekday" @bind="_configuration.Schedule.DayOfWeek">
+                                    @foreach (var day in Enum.GetValues<DayOfWeek>())
+                                    {
+                                        <option value="@day">@day</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="weeklytime">At</label>
+                                <input id="weeklytime" type="time" value="@_configuration.Schedule.TimeOfDay" @onchange="SetTimeOfDay" />
+                            </div>
+                            break;
+
+                        case ScheduleMode.Monthly:
+                            <div class="field">
+                                <label for="monthday">On day</label>
+                                <input id="monthday" type="number" min="1" max="31" @bind="_configuration.Schedule.DayOfMonth" />
+                                <span class="hint">Short months fall back to their last day.</span>
+                            </div>
+                            <div class="field">
+                                <label for="monthlytime">At</label>
+                                <input id="monthlytime" type="time" value="@_configuration.Schedule.TimeOfDay" @onchange="SetTimeOfDay" />
+                            </div>
+                            break;
+                    }
+
+                    <div class="field wide">
+                        <label class="check">
+                            <input type="checkbox" @bind="_configuration.Schedule.CatchUpMissedRuns" />
+                            <span>
+                                Catch up a run the machine was off for
+                                <span class="hint">Off means a missed slot is skipped and the next one is waited for.</span>
+                            </span>
+                        </label>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="actions sticky">
+        <button class="primary" @onclick="SaveAsync" disabled="@_busy">Save configuration</button>
+        @if (!_isNew)
+        {
+            <a class="button" href="@($"/?configuration={_configuration.Id}")">Open on bench</a>
+        }
+        <span class="subtle">Times are machine local. The file is written by the service, not your browser.</span>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private static readonly string[] Methods = { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD" };
+
+    // Secrets are never sent to the browser. These hold only what the user just typed;
+    // an empty box means "keep whatever is already stored".
+    private string _newPassword = string.Empty;
+    private string _newClientSecret = string.Empty;
+    private string _newStaticToken = string.Empty;
+
+    private ApiConfiguration? _configuration;
+    private TokenState? _tokenState;
+    private bool _isNew;
+    private bool _busy;
+    private string? _loadError;
+    private string? _message;
+    private bool _messageIsError;
+    private List<string> _problems = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Id))
+        {
+            _isNew = true;
+            _configuration = new ApiConfiguration();
+            return;
+        }
+
+        _isNew = false;
+        _configuration = await Store.GetAsync(Id);
+
+        if (_configuration is null)
+        {
+            _loadError = "That configuration no longer exists.";
+            return;
+        }
+
+        _tokenState = await TokenStates.GetAsync(Id);
+
+        _newPassword = string.Empty;
+        _newClientSecret = string.Empty;
+        _newStaticToken = string.Empty;
+    }
+
+    /// <summary>Copies any newly typed secret onto the configuration, leaving the rest untouched.</summary>
+    private void ApplyTypedSecrets()
+    {
+        if (_configuration is null) return;
+
+        if (!string.IsNullOrEmpty(_newPassword)) _configuration.Auth.Password = _newPassword;
+        if (!string.IsNullOrEmpty(_newClientSecret)) _configuration.Auth.ClientSecret = _newClientSecret;
+        if (!string.IsNullOrEmpty(_newStaticToken)) _configuration.Auth.StaticToken = _newStaticToken;
+
+        _newPassword = string.Empty;
+        _newClientSecret = string.Empty;
+        _newStaticToken = string.Empty;
+    }
+
+    // A time input binds to TimeOnly in Razor, but the schedule stores HH:mm text.
+    private void SetTimeOfDay(ChangeEventArgs e)
+    {
+        if (_configuration is null) return;
+        if (TimeSpan.TryParse(e.Value?.ToString(), out var time))
+            _configuration.Schedule.TimeOfDay = $"{time:hh\\:mm}";
+    }
+
+    private static string SecretPlaceholder(string stored) =>
+        string.IsNullOrEmpty(stored) ? "Not set" : "Stored — leave blank to keep";
+
+    private static string SecretHint(string stored) =>
+        string.IsNullOrEmpty(stored)
+            ? "Encrypted with the machine key ring when saved."
+            : "A value is stored. Type here only to replace it.";
+
+    private async Task SaveAsync()
+    {
+        if (_configuration is null) return;
+
+        ApplyTypedSecrets();
+        _problems = _configuration.Validate().ToList();
+        if (_problems.Count > 0)
+        {
+            _message = null;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Store.SaveAsync(_configuration);
+            if (_isNew)
+            {
+                Nav.NavigateTo($"configurations/{_configuration.Id}");
+                return;
+            }
+
+            Show("Saved.", isError: false);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task TestTokenAsync()
+    {
+        if (_configuration is null) return;
+
+        ApplyTypedSecrets();
+        _problems = _configuration.Validate().ToList();
+        if (_problems.Count > 0) return;
+
+        _busy = true;
+        try
+        {
+            await Store.SaveAsync(_configuration);
+            _tokenState = await Tokens.GetTokenAsync(_configuration, forceNew: true, CancellationToken.None);
+            Show($"Token received, valid until {_tokenState.ExpiresAtUtc.ToLocalTime():HH:mm:ss}.", isError: false);
+        }
+        catch (TokenAcquisitionException ex)
+        {
+            Show(ex.Message, isError: true);
+        }
+        catch (Exception ex)
+        {
+            Show(ex.Message, isError: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ForgetTokenAsync()
+    {
+        if (_configuration is null) return;
+
+        await Tokens.InvalidateAsync(_configuration.Id, CancellationToken.None);
+        _tokenState = null;
+        Show("Token discarded. The next run authenticates from scratch.", isError: false);
+    }
+
+    private void Show(string message, bool isError)
+    {
+        _message = message;
+        _messageIsError = isError;
+        _problems.Clear();
+    }
+}

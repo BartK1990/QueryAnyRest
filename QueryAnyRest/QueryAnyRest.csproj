@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>QueryAnyRest</RootNamespace>
+    <AssemblyName>QueryAnyRest</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>query-any-rest</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets the same executable run as a console app (F5) and as a Windows service -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <!-- Sandboxed JavaScript engine used for the response transform scripts -->
+    <PackageReference Include="Jint" Version="4.0.3" />
+  </ItemGroup>
+
+</Project>

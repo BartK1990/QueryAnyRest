@@ -1,0 +1,47 @@
+@* Rows of name/value pairs that can be parked with the checkbox instead of deleted. *@
+
+<table class="pairs">
+    <tbody>
+    @for (var i = 0; i < Items.Count; i++)
+    {
+        var index = i;
+        var item = Items[index];
+        <tr>
+            <td class="shrink">
+                <input type="checkbox" checked="@item.Enabled"
+                       @onchange="e => item.Enabled = (bool)(e.Value ?? false)"
+                       aria-label="@($"Send {(string.IsNullOrWhiteSpace(item.Key) ? "this row" : item.Key)}")" />
+            </td>
+            <td style="width:34%">
+                <input type="text" class="mono" placeholder="@KeyPlaceholder"
+                       value="@item.Key"
+                       @onchange="e => item.Key = e.Value?.ToString() ?? string.Empty" />
+            </td>
+            <td>
+                <input type="text" class="mono" placeholder="@ValuePlaceholder"
+                       value="@item.Value"
+                       @onchange="e => item.Value = e.Value?.ToString() ?? string.Empty" />
+            </td>
+            <td class="shrink">
+                <button class="link" @onclick="() => Remove(index)" aria-label="Remove row">Remove</button>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+<button @onclick="Add" style="margin-top:6px">@AddLabel</button>
+
+@code {
+    [Parameter, EditorRequired] public List<KeyValueItem> Items { get; set; } = new();
+    [Parameter] public string KeyPlaceholder { get; set; } = "Name";
+    [Parameter] public string ValuePlaceholder { get; set; } = "Value";
+    [Parameter] public string AddLabel { get; set; } = "Add row";
+
+    private void Add() => Items.Add(new KeyValueItem());
+
+    private void Remove(int index)
+    {
+        if (index >= 0 && index < Items.Count) Items.RemoveAt(index);
+    }
+}

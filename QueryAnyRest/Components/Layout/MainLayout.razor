@@ -1,0 +1,38 @@
+@inherits LayoutComponentBase
+@inject AppOptions Options
+
+<div class="shell">
+    <nav class="rail">
+        <div class="rail-brand">
+            <strong>Query Any REST</strong>
+            <span>REST bench and exporter</span>
+        </div>
+
+        <NavLink href="" Match="NavLinkMatch.All">Bench</NavLink>
+        <NavLink href="configurations">Configurations</NavLink>
+        <NavLink href="history">Run history</NavLink>
+
+        <div class="rail-foot">@Options.DataDirectory</div>
+    </nav>
+
+    <main class="main">
+        <ErrorBoundary @ref="_boundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="error">
+                <div class="error-boundary">
+                    <h2>Something went wrong on this page</h2>
+                    <p>@error.Message</p>
+                    <button @onclick="Recover">Try again</button>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
+    </main>
+</div>
+
+@code {
+    private ErrorBoundary? _boundary;
+
+    private void Recover() => _boundary?.Recover();
+}

@@ -1,0 +1,303 @@
+@page "/"
+@inject ConfigurationStore Store
+@inject RestQueryService Rest
+@inject TransformService Transformer
+@inject JobRunner Runner
+@inject NavigationManager Nav
+
+<PageTitle>Bench — Query Any REST</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Bench</h1>
+        <p>Fire a saved query, read the answer, and check what the transform would write before you let the schedule loose on it.</p>
+    </div>
+    <div class="actions">
+        <a class="button" href="configurations">Configurations</a>
+    </div>
+</div>
+
+@if (_configurations is null)
+{
+    <p class="subtle">Loading…</p>
+}
+else if (_configurations.Count == 0)
+{
+    <div class="panel">
+        <div class="empty">
+            <p>No configurations yet. Create one, or paste the settings block your API came with.</p>
+            <a class="button primary" href="configurations">Go to configurations</a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="panel">
+        <div class="panel-body">
+            <div class="grid">
+                <div class="field">
+                    <label for="picker">Configuration</label>
+                    <select id="picker" value="@_selectedId" @onchange="OnSelectionChanged">
+                        <option value="">Pick one…</option>
+                        @foreach (var configuration in _configurations)
+                        {
+                            <option value="@configuration.Id">@configuration.Name</option>
+                        }
+                    </select>
+                </div>
+
+                @if (_selected is not null)
+                {
+                    <div class="field">
+                        <label>Writes to</label>
+                        <input type="text" class="mono" readonly
+                               value="@System.IO.Path.Combine(_selected.Output.Directory, _selected.Output.BuildFileName(_selected.Transform.Format, DateTimeOffset.Now))" />
+                    </div>
+                    <div class="field wide">
+                        <label>Request</label>
+                        <input type="text" class="mono" readonly
+                               value="@($"{_selected.Request.Method} {_selected.Request.BuildUrl()}")" />
+                    </div>
+                }
+            </div>
+
+            @if (_selected is not null)
+            {
+                <div class="actions" style="margin-top:14px">
+                    <button class="primary" @onclick="() => RunAsync(false)" disabled="@_busy">
+                        @(_busy ? "Working…" : "Send request")
+                    </button>
+                    <button @onclick="() => RunAsync(true)" disabled="@_busy">Send and write file</button>
+                    <a class="button" href="@($"configurations/{_selected.Id}")">Edit configuration</a>
+                    <span class="subtle">
+                        @(_selected.Schedule.Enabled ? _selected.Schedule.Describe() : "No schedule")
+                        · @DescribeAuth(_selected.Auth.Mode)
+                    </span>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (_message is not null)
+{
+    <div class="notice @(_messageIsError ? "fail" : "ok")">@_message</div>
+}
+
+@if (_response is not null)
+{
+    <div class="panel">
+        <div class="meta-strip">
+            <div>
+                <span>Status</span>
+                <strong class="@(_response.Success ? "" : "")">@(_response.StatusCode == 0 ? "—" : $"{_response.StatusCode} {_response.ReasonPhrase}")</strong>
+            </div>
+            <div><span>Time</span><strong>@_response.ElapsedMs ms</strong></div>
+            <div><span>Size</span><strong>@FormatBytes(_response.Body.Length)</strong></div>
+            <div><span>Type</span><strong>@(string.IsNullOrEmpty(_response.ContentType) ? "—" : _response.ContentType)</strong></div>
+            @if (_transform is not null)
+            {
+                <div><span>Transform</span><strong>@(_transform.Success ? $"{FormatBytes(_transform.Content.Length)} in {_transform.ElapsedMs} ms" : "failed")</strong></div>
+            }
+            @if (_writtenPath is not null)
+            {
+                <div><span>Written</span><strong>@_writtenPath</strong></div>
+            }
+        </div>
+
+        <div class="tabs">
+            <button class="@(_tab == Tab.Transformed ? "active" : "")" @onclick="() => _tab = Tab.Transformed">
+                What gets written
+            </button>
+            <button class="@(_tab == Tab.Body ? "active" : "")" @onclick="() => _tab = Tab.Body">
+                Response body
+            </button>
+            <button class="@(_tab == Tab.Headers ? "active" : "")" @onclick="() => _tab = Tab.Headers">
+                Headers
+            </button>
+            @if (_transform is { Log.Count: > 0 })
+            {
+                <button class="@(_tab == Tab.Log ? "active" : "")" @onclick="() => _tab = Tab.Log">
+                    Script log (@_transform.Log.Count)
+                </button>
+            }
+        </div>
+
+        @switch (_tab)
+        {
+            case Tab.Transformed:
+                if (_transform is null)
+                {
+                    <div class="empty"><p>Nothing to transform yet.</p></div>
+                }
+                else if (!_transform.Success)
+                {
+                    <div class="panel-body">
+                        <div class="notice fail">@_transform.Error</div>
+                    </div>
+                }
+                else if (_transform.Content.Length == 0)
+                {
+                    <div class="empty"><p>The transform returned nothing, so no file would be written.</p></div>
+                }
+                else
+                {
+                    <pre class="payload">@Clip(_transform.Content)</pre>
+                }
+                break;
+
+            case Tab.Body:
+                <pre class="payload">@Clip(_response.Body)</pre>
+                break;
+
+            case Tab.Headers:
+                <table>
+                    <tbody>
+                    @foreach (var header in _response.ResponseHeaders.OrderBy(h => h.Key))
+                    {
+                        <tr>
+                            <td class="mono shrink">@header.Key</td>
+                            <td class="mono">@header.Value</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                break;
+
+            case Tab.Log:
+                <pre class="payload">@string.Join('\n', _transform!.Log)</pre>
+                break;
+        }
+    </div>
+}
+
+@code {
+    private enum Tab { Transformed, Body, Headers, Log }
+
+    [SupplyParameterFromQuery(Name = "configuration")]
+    public string? ConfigurationFromQuery { get; set; }
+
+    private List<ApiConfiguration>? _configurations;
+    private ApiConfiguration? _selected;
+    private string _selectedId = string.Empty;
+
+    private QueryResult? _response;
+    private TransformResult? _transform;
+    private string? _writtenPath;
+
+    private Tab _tab = Tab.Transformed;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+
+    private const int PreviewLimit = 200_000;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _configurations = (await Store.GetAllAsync()).ToList();
+
+        var wanted = ConfigurationFromQuery;
+        if (!string.IsNullOrEmpty(wanted) && _configurations.Any(c => c.Id == wanted))
+        {
+            await SelectAsync(wanted);
+        }
+        else if (_configurations.Count == 1)
+        {
+            await SelectAsync(_configurations[0].Id);
+        }
+    }
+
+    private async Task OnSelectionChanged(ChangeEventArgs args) =>
+        await SelectAsync(args.Value?.ToString() ?? string.Empty);
+
+    private async Task SelectAsync(string id)
+    {
+        _selectedId = id;
+        _selected = string.IsNullOrEmpty(id) ? null : await Store.GetAsync(id);
+
+        _response = null;
+        _transform = null;
+        _writtenPath = null;
+        _message = null;
+    }
+
+    private async Task RunAsync(bool writeFile)
+    {
+        if (_selected is null) return;
+
+        _busy = true;
+        _message = null;
+        _writtenPath = null;
+
+        try
+        {
+            if (writeFile)
+            {
+                // Goes through the same path as the scheduler, and calls the endpoint once.
+                var outcome = await Runner.RunAsync(_selected, RunTrigger.Manual, writeFile: true, CancellationToken.None);
+
+                _response = outcome.Response;
+                _transform = outcome.Transform;
+                _writtenPath = outcome.Record.FilePath;
+
+                if (!outcome.Record.Success)
+                {
+                    _message = outcome.Record.Error;
+                    _messageIsError = true;
+                }
+                else if (outcome.Record.FilePath is null)
+                {
+                    _message = "The run succeeded but produced no content, so no file was written.";
+                    _messageIsError = false;
+                }
+                else
+                {
+                    _message = $"Wrote {FormatBytes(outcome.Record.BytesWritten ?? 0)} to {outcome.Record.FilePath}.";
+                    _messageIsError = false;
+                }
+            }
+            else
+            {
+                // A dry run: no file, and nothing added to the history.
+                _response = await Rest.ExecuteAsync(_selected, CancellationToken.None);
+                _transform = _response.Success ? Transformer.Apply(_selected, _response.Body) : null;
+
+                if (!_response.Success)
+                {
+                    _message = _response.Error ?? "The request failed.";
+                    _messageIsError = true;
+                }
+            }
+
+            _tab = _response is { Success: true } ? Tab.Transformed : Tab.Body;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+            _messageIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Clip(string content) =>
+        content.Length <= PreviewLimit
+            ? content
+            : content[..PreviewLimit] + $"\n\n… {FormatBytes(content.Length - PreviewLimit)} more, not shown. The file on disk is complete.";
+
+    private static string FormatBytes(long count) => count switch
+    {
+        < 1024 => $"{count} B",
+        < 1024 * 1024 => $"{count / 1024.0:0.#} kB",
+        _ => $"{count / (1024.0 * 1024.0):0.##} MB"
+    };
+
+    private static string DescribeAuth(AuthMode mode) => mode switch
+    {
+        AuthMode.OAuth2Password => "OAuth 2.0 password grant",
+        AuthMode.StaticBearer => "Bearer token",
+        _ => "No authentication"
+    };
+}

@@ -1,0 +1,64 @@
+{
+  "Version": 1,
+  "Configurations": [
+    {
+      "Id": "0000000000004f6e65566965770001",
+      "Name": "OneView active alarms",
+      "Description": "Hourly CSV drop of the active alarm list.",
+      "Auth": {
+        "Mode": "OAuth2Password",
+        "AuthUrl": "http://10.64.2.142/oneview4/auth",
+        "Username": "Remote",
+        "Password": "Remote",
+        "ClientId": "oneview.public",
+        "ClientSecret": "1m7s68ogxdt3znp9ovdm",
+        "Scope": "public.webapi offline_access",
+        "CredentialPlacement": "RequestBody",
+        "UseRefreshToken": true,
+        "RefreshSkewSeconds": 60,
+        "FallbackLifetimeSeconds": 300,
+        "ExtraTokenParameters": [],
+        "StaticToken": "",
+        "HeaderName": "Authorization",
+        "TokenPrefix": "Bearer"
+      },
+      "Request": {
+        "BaseUrl": "http://10.64.2.142/oneview4/api/nbi",
+        "Path": "/alarms/active",
+        "Method": "GET",
+        "QueryParameters": [],
+        "Headers": [],
+        "Body": "",
+        "ContentType": "application/json",
+        "TimeoutSeconds": 100,
+        "AllowInvalidCertificates": false
+      },
+      "Transform": {
+        "Format": "Csv",
+        "UseScript": true,
+        "Script": "var rows = Array.isArray(json) ? json : (json && json.items) || [];\nif (!rows.length) { log('no rows'); return ''; }\nvar columns = Object.keys(rows[0]);\nfunction cell(v) {\n  if (v === null || v === undefined) return '';\n  var t = (typeof v === 'object') ? JSON.stringify(v) : String(v);\n  return /[\",\\n;]/.test(t) ? '\"' + t.replace(/\"/g, '\"\"') + '\"' : t;\n}\nvar lines = [columns.join(',')];\nfor (var i = 0; i < rows.length; i++) {\n  lines.push(columns.map(function (c) { return cell(rows[i][c]); }).join(','));\n}\nlog('rows: ' + rows.length);\nreturn lines.join('\\r\\n');",
+        "ScriptTimeoutSeconds": 10
+      },
+      "Output": {
+        "Directory": "C:\\ProgramData\\QueryAnyRest\\exports",
+        "FileNameBase": "oneview-alarms",
+        "AppendTimestamp": true,
+        "TimestampFormat": "yyyyMMdd-HHmmss",
+        "UseLocalTimeInName": true,
+        "SkipEmptyResults": true
+      },
+      "Schedule": {
+        "Enabled": true,
+        "Mode": "Hourly",
+        "IntervalMinutes": 15,
+        "MinuteOfHour": 5,
+        "TimeOfDay": "06:00",
+        "DayOfWeek": "Monday",
+        "DayOfMonth": 1,
+        "CatchUpMissedRuns": true
+      },
+      "CreatedUtc": "2026-01-01T00:00:00+00:00",
+      "ModifiedUtc": "2026-01-01T00:00:00+00:00"
+    }
+  ]
+}
