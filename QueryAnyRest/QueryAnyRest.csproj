@@ -8,6 +8,7 @@
     <AssemblyName>QueryAnyRest</AssemblyName>
     <OutputType>Exe</OutputType>
     <UserSecretsId>query-any-rest</UserSecretsId>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

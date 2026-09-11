@@ -60,9 +60,17 @@ body {
 }
 
 .rail-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     padding: 0 18px 20px;
     border-bottom: 1px solid #2b3947;
     margin-bottom: 12px;
+}
+
+.rail-brand img {
+    flex: none;
+    border-radius: 6px;
 }
 
 .rail-brand strong {
