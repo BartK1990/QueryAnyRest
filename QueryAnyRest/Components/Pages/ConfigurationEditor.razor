@@ -42,6 +42,14 @@ else
         <div class="notice @(_messageIsError ? "fail" : "ok")">@_message</div>
     }
 
+    <div class="tabs">
+        <button class="@(_tab == Tab.Identity ? "active" : "")" @onclick="() => _tab = Tab.Identity">Identity &amp; Authentication</button>
+        <button class="@(_tab == Tab.Steps ? "active" : "")" @onclick="() => _tab = Tab.Steps">Steps (@_configuration.Steps.Count)</button>
+        <button class="@(_tab == Tab.Finish ? "active" : "")" @onclick="() => _tab = Tab.Finish">Transform, Output &amp; Schedule</button>
+    </div>
+
+@if (_tab == Tab.Identity)
+{
     <div class="panel">
         <div class="panel-head"><h2>Identity</h2></div>
         <div class="panel-body">
@@ -190,7 +198,10 @@ else
             }
         </div>
     </div>
+}
 
+@if (_tab == Tab.Steps)
+{
     <div class="panel">
         <div class="panel-head">
             <div>
@@ -206,6 +217,7 @@ else
             {
                 var index = i;
                 var step = _configuration.Steps[index];
+                var expanded = IsStepExpanded(step.Id);
                 <div class="panel" style="@(index == 0 ? "" : "margin-top:14px")" @key="step.Id">
                     <div class="panel-head">
                         <div class="field" style="max-width:320px">
@@ -213,52 +225,59 @@ else
                             <input id="@($"stepname{index}")" type="text" @bind="step.Name" />
                         </div>
                         <div class="actions">
+                            <button @onclick="() => ToggleStep(step.Id)">@(expanded ? "Collapse" : "Expand")</button>
                             <button @onclick="() => MoveStep(index, -1)" disabled="@(index == 0)">Move up</button>
                             <button @onclick="() => MoveStep(index, 1)" disabled="@(index == _configuration.Steps.Count - 1)">Move down</button>
                             <button class="danger" @onclick="() => RemoveStep(index)" disabled="@(_configuration.Steps.Count == 1)">Remove</button>
                         </div>
                     </div>
-                    <div class="panel-body">
-                        <RequestEditor Request="step.Request" IdPrefix="@($"step{index}-")" />
+                    @if (expanded)
+                    {
+                        <div class="panel-body">
+                            <RequestEditor Request="step.Request" IdPrefix="@($"step{index}-")" />
 
-                        @if (index > 0)
-                        {
-                            <div class="field wide" style="margin-top:14px">
-                                <label class="check">
-                                    <input type="checkbox" @bind="step.UseBuildScript" />
-                                    <span>
-                                        Build this request from earlier results
-                                        <span class="hint">Runs in a sandbox before the call goes out. No file, network or host access.</span>
+                            @if (index > 0)
+                            {
+                                <div class="field wide" style="margin-top:14px">
+                                    <label class="check">
+                                        <input type="checkbox" @bind="step.UseBuildScript" />
+                                        <span>
+                                            Build this request from earlier results
+                                            <span class="hint">Runs in a sandbox before the call goes out. No file, network or host access.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                            }
+
+                            @if (index > 0 && step.UseBuildScript)
+                            {
+                                <div class="field wide">
+                                    <label for="@($"stepscript{index}")">Script</label>
+                                    <textarea id="@($"stepscript{index}")" class="mono" rows="10" @bind="step.BuildScript"></textarea>
+                                    <span class="hint">
+                                        Available: <span class="mono">request</span> (this call &mdash; mutate it in place),
+                                        <span class="mono">results</span> (every earlier step),
+                                        <span class="mono">previous</span> (the last one, or null on step 1),
+                                        <span class="mono">context</span> (shared with every step and the final script),
+                                        <span class="mono">log(x)</span> (writes to the run log).
+                                        Set <span class="mono">request.query.NAME</span> (or a header) to an array to repeat that name, e.g. <span class="mono">?NAME=a&amp;NAME=b</span>.
                                     </span>
-                                </label>
-                            </div>
-                        }
-
-                        @if (index > 0 && step.UseBuildScript)
-                        {
-                            <div class="field wide">
-                                <label for="@($"stepscript{index}")">Script</label>
-                                <textarea id="@($"stepscript{index}")" class="mono" rows="10" @bind="step.BuildScript"></textarea>
-                                <span class="hint">
-                                    Available: <span class="mono">request</span> (this call &mdash; mutate it in place),
-                                    <span class="mono">results</span> (every earlier step),
-                                    <span class="mono">previous</span> (the last one, or null on step 1),
-                                    <span class="mono">context</span> (shared with every step and the final script),
-                                    <span class="mono">log(x)</span> (writes to the run log).
-                                    Set <span class="mono">request.query.NAME</span> (or a header) to an array to repeat that name, e.g. <span class="mono">?NAME=a&amp;NAME=b</span>.
-                                </span>
-                            </div>
-                            <div class="field">
-                                <label for="@($"stepscripttimeout{index}")">Script timeout in seconds</label>
-                                <input id="@($"stepscripttimeout{index}")" type="number" min="1" max="300" @bind="step.BuildScriptTimeoutSeconds" />
-                            </div>
-                        }
-                    </div>
+                                </div>
+                                <div class="field">
+                                    <label for="@($"stepscripttimeout{index}")">Script timeout in seconds</label>
+                                    <input id="@($"stepscripttimeout{index}")" type="number" min="1" max="300" @bind="step.BuildScriptTimeoutSeconds" />
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
             }
         </div>
     </div>
+}
 
+@if (_tab == Tab.Finish)
+{
     <div class="panel">
         <div class="panel-head">
             <div>
@@ -466,6 +485,7 @@ else
             </div>
         </div>
     </div>
+}
 
     <div class="actions sticky">
         <button class="primary" @onclick="SaveAsync" disabled="@_busy">Save configuration</button>
@@ -478,6 +498,8 @@ else
 }
 
 @code {
+    private enum Tab { Identity, Steps, Finish }
+
     [Parameter] public string? Id { get; set; }
 
     // Secrets are never sent to the browser. These hold only what the user just typed;
@@ -495,13 +517,27 @@ else
     private bool _messageIsError;
     private List<string> _problems = new();
 
+    private Tab _tab = Tab.Identity;
+
+    // Every step starts collapsed to a single line; opening one adds its id here.
+    private readonly HashSet<string> _expandedStepIds = new();
+
+    private bool IsStepExpanded(string stepId) => _expandedStepIds.Contains(stepId);
+
+    private void ToggleStep(string stepId)
+    {
+        if (!_expandedStepIds.Remove(stepId)) _expandedStepIds.Add(stepId);
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(Id))
         {
             _isNew = true;
             _configuration = new ApiConfiguration();
-            _configuration.Steps.Add(new QueryStep { Name = "Step 1" });
+            var firstStep = new QueryStep { Name = "Step 1" };
+            _configuration.Steps.Add(firstStep);
+            _expandedStepIds.Add(firstStep.Id);
             return;
         }
 
@@ -539,7 +575,9 @@ else
     private void AddStep()
     {
         if (_configuration is null) return;
-        _configuration.Steps.Add(new QueryStep { Name = $"Step {_configuration.Steps.Count + 1}" });
+        var step = new QueryStep { Name = $"Step {_configuration.Steps.Count + 1}" };
+        _configuration.Steps.Add(step);
+        _expandedStepIds.Add(step.Id);
     }
 
     private void RemoveStep(int index)
