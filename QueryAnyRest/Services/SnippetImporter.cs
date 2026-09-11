@@ -105,10 +105,17 @@ public static class SnippetImporter
         {
             Name = name,
             Description = "Imported from a settings block.",
-            Request =
+            Steps =
             {
-                BaseUrl = Read(element, "ApiUrl", "BaseUrl", "Url") ?? string.Empty,
-                Method = "GET"
+                new QueryStep
+                {
+                    Name = "Step 1",
+                    Request =
+                    {
+                        BaseUrl = Read(element, "ApiUrl", "BaseUrl", "Url") ?? string.Empty,
+                        Method = "GET"
+                    }
+                }
             },
             Output =
             {

@@ -22,10 +22,21 @@ public sealed class RestQueryService
         _log = log;
     }
 
-    public async Task<QueryResult> ExecuteAsync(ApiConfiguration configuration, CancellationToken ct)
+    public async Task<QueryResult> ExecuteAsync(ApiConfiguration configuration, RequestSettings request, CancellationToken ct)
     {
-        var url = configuration.Request.BuildUrl();
-        var result = new QueryResult { RequestUrl = url };
+        var url = request.BuildUrl();
+        var result = new QueryResult
+        {
+            RequestUrl = url,
+            RequestMethod = request.Method.ToUpperInvariant(),
+            // Grouped rather than a straight ToDictionary: a build script can repeat a
+            // header the same way it can repeat a query parameter.
+            RequestHeaders = request.Headers
+                .Where(h => h.Enabled && !string.IsNullOrWhiteSpace(h.Key))
+                .GroupBy(h => h.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => string.Join(", ", g.Select(h => h.Value ?? string.Empty)), StringComparer.OrdinalIgnoreCase),
+            RequestBody = request.SendsBody ? request.Body : string.Empty
+        };
         var stopwatch = Stopwatch.StartNew();
 
         try
@@ -42,17 +53,17 @@ public sealed class RestQueryService
                 return result;
             }
 
-            using var request = BuildRequest(configuration, url, authorization);
+            using var httpRequest = BuildRequest(configuration, request, url, authorization);
 
             var client = _httpClientFactory.CreateClient(
-                configuration.Request.AllowInvalidCertificates
+                request.AllowInvalidCertificates
                     ? HttpClientNames.Insecure
                     : HttpClientNames.Default);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(configuration.Request.TimeoutSeconds, 1, 3600)));
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(request.TimeoutSeconds, 1, 3600)));
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            using var response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
 
             result.StatusCode = (int)response.StatusCode;
             result.ReasonPhrase = response.ReasonPhrase ?? string.Empty;
@@ -70,7 +81,7 @@ public sealed class RestQueryService
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            result.Error = $"The request did not answer within {configuration.Request.TimeoutSeconds} seconds.";
+            result.Error = $"The request did not answer within {request.TimeoutSeconds} seconds.";
         }
         catch (HttpRequestException ex)
         {
@@ -90,10 +101,8 @@ public sealed class RestQueryService
         return result;
     }
 
-    private static HttpRequestMessage BuildRequest(ApiConfiguration configuration, string url, string? authorization)
+    private static HttpRequestMessage BuildRequest(ApiConfiguration configuration, RequestSettings settings, string url, string? authorization)
     {
-        var settings = configuration.Request;
-
         var request = new HttpRequestMessage(new HttpMethod(settings.Method.ToUpperInvariant()), url);
 
         if (settings.SendsBody)

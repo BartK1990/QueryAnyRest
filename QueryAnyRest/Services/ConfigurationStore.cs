@@ -136,7 +136,12 @@ public sealed class ConfigurationStore
 
     private async Task<ConfigurationFile> LoadUnlockedAsync(CancellationToken ct)
     {
-        _file ??= await JsonFileStore.ReadAsync(_options.ConfigurationFile, () => new ConfigurationFile(), ct);
+        if (_file is null)
+        {
+            _file = await JsonFileStore.ReadAsync(_options.ConfigurationFile, () => new ConfigurationFile(), ct);
+            ApiConfiguration.MigrateLegacySteps(_file.Configurations);
+        }
+
         return _file;
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace QueryAnyRest.Models;
 
@@ -13,10 +14,32 @@ public sealed class ApiConfiguration
     public string Description { get; set; } = string.Empty;
 
     public AuthSettings Auth { get; set; } = new();
-    public RequestSettings Request { get; set; } = new();
+    public List<QueryStep> Steps { get; set; } = new();
     public TransformSettings Transform { get; set; } = new();
     public OutputSettings Output { get; set; } = new();
     public ScheduleSettings Schedule { get; set; } = new();
+
+    /// <summary>
+    /// Kept only so a configuration saved before step chaining still loads: the old
+    /// single-request shape lands here, and <see cref="MigrateLegacySteps"/> turns it
+    /// into a one-step chain the first time the configuration is loaded.
+    /// </summary>
+    [JsonPropertyName("Request")]
+    public RequestSettings? LegacyRequest { get; set; }
+
+    /// <summary>Turns any pre-chaining configuration's single request into "Step 1".</summary>
+    public static void MigrateLegacySteps(IEnumerable<ApiConfiguration> configurations)
+    {
+        foreach (var configuration in configurations)
+        {
+            if (configuration.Steps.Count == 0 && configuration.LegacyRequest is not null)
+            {
+                configuration.Steps.Add(new QueryStep { Name = "Step 1", Request = configuration.LegacyRequest });
+            }
+
+            configuration.LegacyRequest = null;
+        }
+    }
 
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ModifiedUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -35,10 +58,18 @@ public sealed class ApiConfiguration
         if (string.IsNullOrWhiteSpace(Name))
             problems.Add("Give the configuration a name.");
 
-        if (string.IsNullOrWhiteSpace(Request.BaseUrl))
-            problems.Add("Set the API URL.");
-        else if (!Uri.TryCreate(Request.BuildUrl(), UriKind.Absolute, out _))
-            problems.Add("The API URL and path do not form a valid absolute address.");
+        if (Steps.Count == 0)
+            problems.Add("Add at least one step.");
+
+        foreach (var step in Steps)
+        {
+            var label = Steps.Count > 1 ? $"Step '{step.Name}': " : string.Empty;
+
+            if (string.IsNullOrWhiteSpace(step.Request.BaseUrl))
+                problems.Add($"{label}Set the API URL.");
+            else if (!Uri.TryCreate(step.Request.BuildUrl(), UriKind.Absolute, out _))
+                problems.Add($"{label}The API URL and path do not form a valid absolute address.");
+        }
 
         if (Auth.Mode == AuthMode.OAuth2Password)
         {

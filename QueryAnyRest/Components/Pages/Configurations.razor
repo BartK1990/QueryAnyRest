@@ -61,7 +61,20 @@
                                 }
                             </div>
                         </td>
-                        <td class="mono">@configuration.Request.Method @configuration.Request.BuildUrl()</td>
+                        <td class="mono">
+                            @if (configuration.Steps.Count == 0)
+                            {
+                                <span class="subtle">No steps</span>
+                            }
+                            else
+                            {
+                                @configuration.Steps[0].Request.Method @configuration.Steps[0].Request.BuildUrl()
+                                @if (configuration.Steps.Count > 1)
+                                {
+                                    <span class="subtle"> (+@(configuration.Steps.Count - 1) more)</span>
+                                }
+                            }
+                        </td>
                         <td>@DescribeAuth(configuration.Auth.Mode)</td>
                         <td>
                             @if (configuration.Schedule.Enabled && configuration.Schedule.Mode != ScheduleMode.Manual)

@@ -4,19 +4,19 @@ using QueryAnyRest.Models;
 namespace QueryAnyRest.Services;
 
 /// <summary>
-/// The record that goes into the history, plus the response and transform kept in
-/// memory for the caller. Only <see cref="Record"/> is persisted.
+/// The record that goes into the history, plus every step's outcome and the final
+/// transform kept in memory for the caller. Only <see cref="Record"/> is persisted.
 /// </summary>
-public sealed record RunOutcome(RunRecord Record, QueryResult? Response, TransformResult? Transform);
+public sealed record RunOutcome(RunRecord Record, IReadOnlyList<StepOutcome> Steps, TransformResult? Transform);
 
 /// <summary>
-/// One execution end to end: call, transform, write. Shared by the Run button
-/// and by the scheduler so both behave identically, and so a manual run with
-/// "write file" ticked calls the endpoint exactly once.
+/// One execution end to end: run the chain, transform, write. Shared by the Run
+/// button and by the scheduler so both behave identically, and so a manual run
+/// with "write file" ticked calls every endpoint in the chain exactly once.
 /// </summary>
 public sealed class JobRunner
 {
-    private readonly RestQueryService _rest;
+    private readonly QueryChainService _chain;
     private readonly TransformService _transform;
     private readonly ExportService _export;
     private readonly RunHistory _history;
@@ -24,14 +24,14 @@ public sealed class JobRunner
     private readonly ILogger<JobRunner> _log;
 
     public JobRunner(
-        RestQueryService rest,
+        QueryChainService chain,
         TransformService transform,
         ExportService export,
         RunHistory history,
         JobStateStore jobStates,
         ILogger<JobRunner> log)
     {
-        _rest = rest;
+        _chain = chain;
         _transform = transform;
         _export = export;
         _history = history;
@@ -53,27 +53,32 @@ public sealed class JobRunner
             Trigger = trigger
         };
 
-        QueryResult? response = null;
+        ChainOutcome? chainOutcome = null;
         TransformResult? transformed = null;
 
         try
         {
-            response = await _rest.ExecuteAsync(configuration, ct);
-            record.StatusCode = response.StatusCode == 0 ? null : response.StatusCode;
+            chainOutcome = await _chain.RunAsync(configuration, ct);
 
-            if (!response.Success)
+            record.ScriptLog.AddRange(chainOutcome.Steps
+                .SelectMany(step => step.BuildScriptLog.Select(line => $"[{step.StepName}] {line}")));
+
+            var lastStatus = chainOutcome.Steps.Count > 0 ? chainOutcome.Steps[^1].Response.StatusCode : 0;
+            record.StatusCode = lastStatus == 0 ? null : lastStatus;
+
+            if (!chainOutcome.Success)
             {
-                record.Error = response.Error ?? "The request failed.";
-                return await FinishAsync(configuration, record, response, transformed, stopwatch);
+                record.Error = chainOutcome.Error ?? "The request failed.";
+                return await FinishAsync(configuration, record, chainOutcome, transformed, stopwatch);
             }
 
-            transformed = _transform.Apply(configuration, response.Body);
+            transformed = _transform.Apply(configuration, chainOutcome.Steps, chainOutcome.FinalContextJson);
             record.ScriptLog.AddRange(transformed.Log);
 
             if (!transformed.Success)
             {
                 record.Error = transformed.Error;
-                return await FinishAsync(configuration, record, response, transformed, stopwatch);
+                return await FinishAsync(configuration, record, chainOutcome, transformed, stopwatch);
             }
 
             if (writeFile)
@@ -98,13 +103,13 @@ public sealed class JobRunner
             record.Error = ex.Message;
         }
 
-        return await FinishAsync(configuration, record, response, transformed, stopwatch);
+        return await FinishAsync(configuration, record, chainOutcome, transformed, stopwatch);
     }
 
     private async Task<RunOutcome> FinishAsync(
         ApiConfiguration configuration,
         RunRecord record,
-        QueryResult? response,
+        ChainOutcome? chainOutcome,
         TransformResult? transformed,
         Stopwatch stopwatch)
     {
@@ -138,6 +143,6 @@ public sealed class JobRunner
         await _jobStates.SetAsync(state, CancellationToken.None);
         await _history.AddAsync(record, CancellationToken.None);
 
-        return new RunOutcome(record, response, transformed);
+        return new RunOutcome(record, chainOutcome?.Steps ?? Array.Empty<StepOutcome>(), transformed);
     }
 }

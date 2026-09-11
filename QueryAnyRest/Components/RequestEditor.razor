@@ -1,0 +1,72 @@
+@* The fields for one step's HTTP call: method, address, parameters, body. *@
+
+<div class="grid">
+    <div class="field">
+        <label for="@($"{IdPrefix}method")">Method</label>
+        <select id="@($"{IdPrefix}method")" @bind="Request.Method" disabled="@Busy">
+            @foreach (var method in Methods)
+            {
+                <option value="@method">@method</option>
+            }
+        </select>
+    </div>
+    <div class="field">
+        <label for="@($"{IdPrefix}timeout")">Timeout in seconds</label>
+        <input id="@($"{IdPrefix}timeout")" type="number" min="1" max="3600" @bind="Request.TimeoutSeconds" disabled="@Busy" />
+    </div>
+    <div class="field wide">
+        <label for="@($"{IdPrefix}baseurl")">API URL</label>
+        <input id="@($"{IdPrefix}baseurl")" type="text" class="mono" @bind="Request.BaseUrl"
+               placeholder="http://10.64.2.142/oneview4/api/nbi" disabled="@Busy" />
+    </div>
+    <div class="field wide">
+        <label for="@($"{IdPrefix}path")">Path</label>
+        <input id="@($"{IdPrefix}path")" type="text" class="mono" @bind="Request.Path"
+               placeholder="/alarms/active" disabled="@Busy" />
+        <span class="hint">Resolves to <span class="mono">@Request.BuildUrl()</span></span>
+    </div>
+    <div class="field wide">
+        <label>Query parameters</label>
+        <KeyValueEditor Items="Request.QueryParameters"
+                        KeyPlaceholder="from" ValuePlaceholder="2026-01-01T00:00:00Z"
+                        AddLabel="Add parameter" />
+    </div>
+    <div class="field wide">
+        <label>Headers</label>
+        <KeyValueEditor Items="Request.Headers"
+                        KeyPlaceholder="Accept" ValuePlaceholder="application/json"
+                        AddLabel="Add header" />
+    </div>
+
+    @if (!string.Equals(Request.Method, "GET", StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="field">
+            <label for="@($"{IdPrefix}contenttype")">Body content type</label>
+            <input id="@($"{IdPrefix}contenttype")" type="text" class="mono" @bind="Request.ContentType" disabled="@Busy" />
+        </div>
+        <div class="field wide">
+            <label for="@($"{IdPrefix}body")">Body</label>
+            <textarea id="@($"{IdPrefix}body")" class="mono" rows="8" @bind="Request.Body" disabled="@Busy"></textarea>
+        </div>
+    }
+
+    <div class="field wide">
+        <label class="check">
+            <input type="checkbox" @bind="Request.AllowInvalidCertificates" disabled="@Busy" />
+            <span>
+                Accept any TLS certificate from this host
+                <span class="hint">For appliances with a self-signed certificate. It disables certificate checks for this step only.</span>
+            </span>
+        </label>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] Methods = { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD" };
+
+    [Parameter, EditorRequired] public RequestSettings Request { get; set; } = null!;
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>Keeps element ids unique when several steps render on the same page.</summary>
+    [Parameter] public string IdPrefix { get; set; } = string.Empty;
+}

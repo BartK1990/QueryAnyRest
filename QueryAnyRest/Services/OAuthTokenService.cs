@@ -147,13 +147,17 @@ public sealed class OAuthTokenService
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", encoded);
         }
 
+        // Auth is shared by the whole chain; the first step's request settings stand in
+        // for the certificate and timeout behavior of the token call itself.
+        var requestSettings = configuration.Steps.Count > 0 ? configuration.Steps[0].Request : new RequestSettings();
+
         var client = _httpClientFactory.CreateClient(
-            configuration.Request.AllowInvalidCertificates
+            requestSettings.AllowInvalidCertificates
                 ? HttpClientNames.Insecure
                 : HttpClientNames.Default);
 
         // The token call shares the request timeout, so a silent token endpoint cannot hang a run.
-        var seconds = Math.Clamp(configuration.Request.TimeoutSeconds, 1, 3600);
+        var seconds = Math.Clamp(requestSettings.TimeoutSeconds, 1, 3600);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(seconds));
 

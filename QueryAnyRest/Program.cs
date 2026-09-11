@@ -59,6 +59,8 @@ builder.Services.AddSingleton<RunHistory>();
 
 builder.Services.AddSingleton<OAuthTokenService>();
 builder.Services.AddSingleton<RestQueryService>();
+builder.Services.AddSingleton<RequestBuilderService>();
+builder.Services.AddSingleton<QueryChainService>();
 builder.Services.AddSingleton<TransformService>();
 builder.Services.AddSingleton<ExportService>();
 builder.Services.AddSingleton<JobRunner>();
