@@ -101,6 +101,49 @@ public sealed class ConfigurationStore
         return copy;
     }
 
+    /// <summary>
+    /// Every configuration, with secrets stripped rather than exported as ciphertext:
+    /// the encryption key lives only on this machine, so a password or token carried
+    /// into the file would not decrypt anywhere else anyway.
+    /// </summary>
+    public async Task<ConfigurationFile> GetExportAsync(CancellationToken ct = default)
+    {
+        var all = await GetAllAsync(ct);
+        return new ConfigurationFile { Configurations = all.Select(Sanitized).ToList() };
+    }
+
+    /// <summary>Adds each configuration, replacing any existing one with the same id.</summary>
+    public async Task<int> ImportAsync(IEnumerable<ApiConfiguration> configurations, CancellationToken ct = default)
+    {
+        var count = 0;
+        foreach (var configuration in configurations)
+        {
+            // An export never carries secrets. Re-importing the same file on the machine
+            // that made it must not blank out a credential that already works here.
+            var existing = await GetAsync(configuration.Id, ct);
+            if (existing is not null)
+            {
+                if (string.IsNullOrEmpty(configuration.Auth.Password)) configuration.Auth.Password = existing.Auth.Password;
+                if (string.IsNullOrEmpty(configuration.Auth.ClientSecret)) configuration.Auth.ClientSecret = existing.Auth.ClientSecret;
+                if (string.IsNullOrEmpty(configuration.Auth.StaticToken)) configuration.Auth.StaticToken = existing.Auth.StaticToken;
+            }
+
+            await SaveAsync(configuration, ct);
+            count++;
+        }
+
+        return count;
+    }
+
+    private static ApiConfiguration Sanitized(ApiConfiguration source)
+    {
+        var clone = source.Clone();
+        clone.Auth.Password = string.Empty;
+        clone.Auth.ClientSecret = string.Empty;
+        clone.Auth.StaticToken = string.Empty;
+        return clone;
+    }
+
     /// <summary>Replaces the whole file, used by the import screen.</summary>
     public async Task ReplaceAllAsync(IEnumerable<ApiConfiguration> configurations, CancellationToken ct = default)
     {

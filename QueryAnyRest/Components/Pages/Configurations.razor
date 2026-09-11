@@ -12,6 +12,7 @@
            <span class="mono">configurations.json</span> next to the service.</p>
     </div>
     <div class="actions">
+        <a class="button" href="/export/configurations" download>Export configurations</a>
         <button class="primary" @onclick="CreateNew">New configuration</button>
     </div>
 </div>
@@ -77,17 +78,25 @@
                         </td>
                         <td>@DescribeAuth(configuration.Auth.Mode)</td>
                         <td>
-                            @if (configuration.Schedule.Enabled && configuration.Schedule.Mode != ScheduleMode.Manual)
-                            {
-                                <div class="stack">
-                                    <span class="tag armed">@configuration.Schedule.Describe()</span>
-                                    <span class="subtle">Next @Local(state?.NextDueUtc)</span>
-                                </div>
-                            }
-                            else
-                            {
-                                <span class="tag idle">Manual</span>
-                            }
+                            <label class="check">
+                                <input type="checkbox" checked="@configuration.Schedule.Enabled"
+                                       disabled="@(!configuration.Schedule.Enabled && !CanEnableSchedule(configuration))"
+                                       title="@(CanEnableSchedule(configuration) ? "Turn the schedule on or off" : "Set how often it runs in the editor first")"
+                                       @onchange="() => ToggleScheduleAsync(configuration)" />
+                                <span>
+                                    @if (configuration.Schedule.Enabled && configuration.Schedule.Mode != ScheduleMode.Manual)
+                                    {
+                                        <div class="stack">
+                                            <span class="tag armed">@configuration.Schedule.Describe()</span>
+                                            <span class="subtle">Next @Local(state?.NextDueUtc)</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="tag idle">@ScheduleBadgeText(configuration)</span>
+                                    }
+                                </span>
+                            </label>
                         </td>
                         <td>
                             @if (state?.LastRunUtc is null)
@@ -130,6 +139,21 @@
 <div class="panel">
     <div class="panel-head">
         <div>
+            <h2>Import configurations</h2>
+            <p>Add every configuration from a file exported with the button above &mdash; from this machine or another one. An existing configuration with the same id is replaced; everything else is untouched. Passwords, client secrets and bearer tokens are never included in the export, so re-enter them here afterwards.</p>
+        </div>
+    </div>
+    <div class="panel-body">
+        <div class="field wide">
+            <label for="importfile">Configurations file</label>
+            <InputFile id="importfile" OnChange="ImportFileAsync" accept="application/json" disabled="@_importing" />
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-head">
+        <div>
             <h2>Paste a settings block</h2>
             <p>Reads the appsettings shape these APIs usually ship with. One block or several at once.</p>
         </div>
@@ -153,6 +177,9 @@
     private string _snippet = string.Empty;
     private string? _message;
     private bool _messageIsError;
+    private bool _importing;
+
+    private const long MaxImportFileBytes = 10 * 1024 * 1024;
 
     // The Razor parser does not understand raw string literals, so this stays verbatim.
     private const string SnippetPlaceholder = @"""OneView"": {
@@ -208,6 +235,66 @@
         {
             Show(ex.Message, isError: true);
         }
+    }
+
+    private async Task ImportFileAsync(InputFileChangeEventArgs e)
+    {
+        _importing = true;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(MaxImportFileBytes);
+            var imported = await System.Text.Json.JsonSerializer.DeserializeAsync<ConfigurationFile>(stream, JsonDefaults.Storage);
+
+            if (imported is null || imported.Configurations.Count == 0)
+            {
+                Show($"{file.Name} did not contain any configurations.", isError: true);
+                return;
+            }
+
+            var count = await Store.ImportAsync(imported.Configurations);
+            Show($"Imported {count} configuration{(count == 1 ? "" : "s")} from {file.Name}. " +
+                 "Passwords, client secrets and bearer tokens were not in the file — open each one to set them again.",
+                 isError: false);
+            await ReloadAsync();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            Show("That file is not a configurations export this app recognizes.", isError: true);
+        }
+        catch (Exception ex)
+        {
+            Show(ex.Message, isError: true);
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private static bool CanEnableSchedule(ApiConfiguration configuration) =>
+        configuration.Schedule.Mode != ScheduleMode.Manual &&
+        !string.IsNullOrWhiteSpace(configuration.Output.Directory);
+
+    private static string ScheduleBadgeText(ApiConfiguration configuration) =>
+        configuration.Schedule.Mode == ScheduleMode.Manual
+            ? "Not set up"
+            : $"{configuration.Schedule.Describe()} (off)";
+
+    private async Task ToggleScheduleAsync(ApiConfiguration configuration)
+    {
+        if (!configuration.Schedule.Enabled && !CanEnableSchedule(configuration))
+        {
+            Show($"Set how often \"{configuration.Name}\" runs in the editor before turning its schedule on.", isError: true);
+            return;
+        }
+
+        // configuration is the store's own live object (GetAllAsync does not clone it
+        // for display), so flip the schedule on a copy rather than editing it in place.
+        var updated = configuration.Clone();
+        updated.Schedule.Enabled = !updated.Schedule.Enabled;
+        await Store.SaveAsync(updated);
+        await ReloadAsync();
     }
 
     private void Show(string message, bool isError)

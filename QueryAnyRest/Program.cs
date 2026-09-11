@@ -109,6 +109,17 @@ app.UseAntiforgery();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+// A plain GET so the browser can save the response as a file; Blazor Server has no
+// other way to trigger a download. Secrets are stripped before this is called.
+app.MapGet("/export/configurations", async (ConfigurationStore store) =>
+{
+    var export = await store.GetExportAsync();
+    var json = System.Text.Json.JsonSerializer.Serialize(export, JsonDefaults.Storage);
+    var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+    var fileName = $"queryanyrest-configurations-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+    return Results.File(bytes, "application/json", fileName);
+});
+
 app.Logger.LogInformation(
     "Query Any REST is starting. Data directory: {Directory}", appOptions.DataDirectory);
 
