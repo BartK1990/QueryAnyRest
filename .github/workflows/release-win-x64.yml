@@ -44,10 +44,14 @@ jobs:
           name: QueryAnyRest-win-x64
           path: QueryAnyRest-*-win-x64.zip
 
+      - name: Compute tag
+        shell: pwsh
+        run: echo "TAG=v$($env:VERSION.TrimStart('v'))" >> $env:GITHUB_ENV
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION != '' && startsWith(env.VERSION, 'v') && substring(env.VERSION, 1) || env.VERSION }}
+          tag_name: ${{ env.TAG }}
           name: Query Any REST ${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
