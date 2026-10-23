@@ -1,0 +1,54 @@
+name: Release (win-x64)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $v = $env:VERSION.TrimStart('v')
+          dotnet publish QueryAnyRest/QueryAnyRest.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$v `
+            -o publish
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = $env:VERSION.TrimStart('v')
+          Compress-Archive -Path publish/* -DestinationPath "QueryAnyRest-$v-win-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QueryAnyRest-win-x64
+          path: QueryAnyRest-*-win-x64.zip
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION != '' && startsWith(env.VERSION, 'v') && substring(env.VERSION, 1) || env.VERSION }}
+          name: Query Any REST ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: QueryAnyRest-*-win-x64.zip
